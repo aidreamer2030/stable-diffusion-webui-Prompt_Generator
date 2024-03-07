@@ -18,11 +18,12 @@ import modules
 from pathlib import Path
 from modules import script_callbacks
 import modules.scripts as scripts
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import subprocess, pathlib
 
 result_prompt = ""
 models = {}
-max_no_results = 20  # TODO move to setting panel
+max_no_results = 5  # TODO move to setting panel
 base_dir = scripts.basedir()
 model_file = Path(base_dir, "models.json")
 
@@ -32,10 +33,11 @@ class Model:
     Small strut to hold data for the text generator
     '''
 
-    def __init__(self, name, model, tokenizer) -> None:
+    def __init__(self, name, model, tokenizer, prompt) -> None:
         self.name = name
         self.model = model
         self.tokenizer = tokenizer
+        self.prompt = prompt
         pass
 
 
@@ -50,7 +52,8 @@ def populate_models():
         name = item["Title"]
         model = item["Model"]
         tokenizer = item["Tokenizer"]
-        models[name] = Model(name, model, tokenizer)
+        prompt = item.get("Prompt")
+        models[name] = Model(name, model, tokenizer, prompt)
 
 
 def add_to_prompt(prompt):  # A holder TODO figure out how to get rid of it
@@ -74,7 +77,7 @@ def on_ui_tabs():
     def generate_longer_generic(prompt, temperature, top_k,
                                 max_length, repetition_penalty,
                                 num_return_sequences, name, use_punctuation=False,
-                                use_blacklist=False):  # TODO make the progress bar work
+                                use_blacklist=False, prompt_override=None, progress=gr.Progress()):  # TODO make the progress bar work
         """Generates a longer string from the input
 
         Args:
@@ -99,15 +102,57 @@ def on_ui_tabs():
         Returns:
             Returns only an error otherwise saves it in result_prompt
         """
+        global result_prompt
+        orig_prompt = prompt
+        if models[name].prompt:
+            prompt = (prompt_override if prompt_override else models[name].prompt) % prompt
+
+        if "gguf" in models[name].model:
+            all_results = []
+            for i in progress.tqdm(range(num_return_sequences), "Generating..."):
+                result = subprocess.run(
+                    [
+                        "./extensions/stable-diffusion-webui-Prompt_Generator/llama.cpp",
+                        "-ngl",
+                        "40",
+                        "-m",
+                        models[name].model,
+                        "-c",
+                        "512",
+                        "-r",
+                        "</s>",
+                        "--simple-io",
+                        "--no-display-prompt",
+                        "--temp",
+                        f"{temperature}",
+                        "--repeat-penalty",
+                        f"{repetition_penalty}",
+                        "--top-k",
+                        f"{top_k}",
+                        "-n",
+                        f"{max_length}",
+                        "-e",
+                        "-p",
+                        prompt,
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                )
+                if result.returncode:
+                    raise gr.Error(f"Error: {result.returncode}")
+                all_results.append(result.stdout.decode().strip())
+
+            result_prompt = "\n".join(all_results)
+            return orig_prompt
         try:
             print("[Prompt_Generator]:","Loading Tokenizer")
-            tokenizer = GPT2Tokenizer.from_pretrained(models[name].tokenizer)
+            tokenizer = AutoTokenizer.from_pretrained(models[name].tokenizer)
             tokenizer.add_special_tokens({'pad_token': '[PAD]'})
             print("[Prompt_Generator]:","Loading Model")
-            model = GPT2LMHeadModel.from_pretrained(models[name].model)
+            model = AutoModelForCausalLM.from_pretrained(models[name].model)
         except Exception as e:
-            print("[Prompt_Generator]:",f"Exception encountered while attempting to install tokenizer")
-            return gr.update(), f"Error: {e}"
+            print("[Prompt_Generator]:",f"Exception encountered while attempting to install tokenizer: {e}")
+            raise gr.Error(f"Error: {e}")
         try:
             print("[Prompt_Generator]:",f"Generate new prompt from: \"{prompt}\" with {name}")
             input_ids = tokenizer(prompt, return_tensors='pt').input_ids
@@ -139,15 +184,14 @@ def on_ui_tabs():
                     for to_check in blacklist:
                         tempString = re.sub(
                             to_check, "", tempString, flags=re.IGNORECASE)
-                if (i == 0):
-                    global result_prompt
 
             result_prompt = tempString
             # print(result_prompt)
         except Exception as e:
             print("[Prompt_Generator]:",
                 f"Exception encountered while attempting to generate prompt: {e}")
-            return gr.update(), f"Error: {e}"
+            raise gr.Error(f"Error: {e}")
+        return orig_prompt
 
     def ui_dynamic_result_visible(num):
         """Makes the results visible"""
@@ -204,7 +248,14 @@ def on_ui_tabs():
                 repetitionPenalty_slider = gr.Slider(
                     elem_id="repetition_penalty_slider", label="Repetition Penalty", value=1.2, minimum=0.1, maximum=10, interactive=True)
                 numReturnSequences_slider = gr.Slider(
-                    elem_id="num_return_sequences_slider", label="How Many To Generate", value=5, minimum=1, maximum=max_no_results, interactive=True, step=1)
+                    elem_id="num_return_sequences_slider",
+                    label="How Many To Generate",
+                    value=1,
+                    minimum=1,
+                    maximum=max_no_results,
+                    interactive=True,
+                    step=1,
+                )
         with gr.Column():
             with gr.Row():
                 useBlacklist_checkbox = gr.Checkbox(label="Use blacklist?")
@@ -212,11 +263,17 @@ def on_ui_tabs():
         with gr.Column():
             with gr.Row():
                 populate_models()
-                generate_dropdown = gr.Dropdown(choices=list(models.keys()), value=list(models.keys())[
-                                                1 if len(models) > 0 else 0], label="Which model to use?", show_label=True)  # TODO Add default to setting page
+                generate_dropdown = gr.Dropdown(
+                    choices=list(models.keys()),
+                    value=list(models.keys())[0] if len(models) > 0 else None,
+                    label="Which model to use?",
+                    show_label=True,
+                )  # TODO Add default to setting page
                 use_punctuation_check = gr.Checkbox(label="Use punctuation?")
                 generate_button = gr.Button(
                     value="Generate", elem_id="generate_button")  # TODO Add element to show that it is working in the background so users don't think nothing is happening
+            with gr.Row():
+                prompt_override_textbox = gr.TextArea(lines=2, elem_id="prompt_override", label="Instruct prompt override")
 
         # Handles UI for results
         results_vis = []
@@ -260,10 +317,19 @@ def on_ui_tabs():
         generate_button.click(fn=generate_longer_generic, inputs=[
             prompt_textbox, temp_slider, topK_slider, maxLength_slider,
             repetitionPenalty_slider, numReturnSequences_slider,
-            generate_dropdown, use_punctuation_check, useBlacklist_checkbox]).then(
+            generate_dropdown, use_punctuation_check, useBlacklist_checkbox, prompt_override_textbox], outputs=[prompt_textbox]).then(
             fn=ui_dynamic_result_visible, inputs=numReturnSequences_slider,
             outputs=results_vis).then(
             fn=ui_dynamic_result_prompts, outputs=results_txt_list).then(fn=ui_dynamic_result_batch, outputs=batch_texbox)
+
+        generate_dropdown.change(
+            fn=lambda name: models[name].prompt,
+            inputs=generate_dropdown,
+            outputs=prompt_override_textbox,
+        )
+        def init_field(name):
+            prompt_override_textbox.value = models[name].prompt
+        generate_dropdown.init_field = init_field
     return (prompt_generator, "Prompt Generator", "Prompt Generator"),
 
 
