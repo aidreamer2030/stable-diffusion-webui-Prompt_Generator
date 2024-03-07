@@ -33,11 +33,12 @@ class Model:
     Small strut to hold data for the text generator
     '''
 
-    def __init__(self, name, model, tokenizer, prompt) -> None:
+    def __init__(self, name, model, tokenizer, prompt, eos) -> None:
         self.name = name
         self.model = model
         self.tokenizer = tokenizer
         self.prompt = prompt
+        self.eos = eos
         pass
 
 
@@ -53,7 +54,8 @@ def populate_models():
         model = item["Model"]
         tokenizer = item["Tokenizer"]
         prompt = item.get("Prompt")
-        models[name] = Model(name, model, tokenizer, prompt)
+        eos = item.get("EOS")
+        models[name] = Model(name, model, tokenizer, prompt, eos)
 
 
 def add_to_prompt(prompt):  # A holder TODO figure out how to get rid of it
@@ -120,7 +122,7 @@ def on_ui_tabs():
                         "-c",
                         "512",
                         "-r",
-                        "</s>",
+                        models[name].eos,
                         "--simple-io",
                         "--no-display-prompt",
                         "--temp",
@@ -140,7 +142,8 @@ def on_ui_tabs():
                 )
                 if result.returncode:
                     raise gr.Error(f"Error: {result.returncode}")
-                all_results.append(result.stdout.decode().strip())
+                result_text = result.stdout.decode().strip().removesuffix(models[name].eos)
+                all_results.append(result_text)
 
             result_prompt = "\n".join(all_results)
             return orig_prompt
