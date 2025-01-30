@@ -243,7 +243,7 @@ def on_ui_tabs():
                 temp_slider = gr.Slider(
                     elem_id="temp_slider", label="Temperature", interactive=True, minimum=0, maximum=1, value=0.9)
                 maxLength_slider = gr.Slider(
-                    elem_id="max_length_slider", label="Max Length", interactive=True, minimum=1, maximum=200, step=1, value=90)
+                    elem_id="max_length_slider", label="Max Length", interactive=True, minimum=1, maximum=400, step=1, value=300)
                 topK_slider = gr.Slider(
                     elem_id="top_k_slider", label="Top K", value=8, minimum=1, maximum=20, step=1, interactive=True)
         with gr.Column():
