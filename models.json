@@ -8,5 +8,25 @@
         "Title":"FredZhang7",
         "Tokenizer":"distilgpt2",
         "Model":"FredZhang7/distilgpt2-stable-diffusion-v2"
-    }
+    },
+    {
+        "Title":"Gustavosta",
+        "Tokenizer":"gpt2",
+        "Model":"Gustavosta/MagicPrompt-Stable-Diffusion"
+    },
+    {
+        "Title":"promptgen-lexart",
+        "Tokenizer":"distilgpt2",
+        "Model":"AUTOMATIC/promptgen-lexart"
+    },
+    {
+        "Title":"promptgen-majinai-unsafe",
+        "Tokenizer":"distilgpt2",
+        "Model":"AUTOMATIC/promptgen-majinai-unsafe"
+    },
+    {
+        "Title":"text2image-prompt-generator",
+        "Tokenizer":"gpt2",
+        "Model":"succinctly/text2image-prompt-generator"
+    },
 ]
